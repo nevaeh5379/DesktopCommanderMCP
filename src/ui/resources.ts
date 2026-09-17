@@ -7,6 +7,26 @@ import { fileURLToPath } from 'url';
 import { CONFIG_EDITOR_RESOURCE_URI, FILE_PREVIEW_RESOURCE_URI } from './contracts.js';
 
 const UI_RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
+const DEFAULT_WIDGET_DOMAIN = 'https://desktopcommander.app';
+
+function getUiResourceMeta(): Record<string, unknown> {
+    const widgetDomain = process.env.DESKTOP_COMMANDER_WIDGET_DOMAIN?.trim() || DEFAULT_WIDGET_DOMAIN;
+
+    return {
+        ui: {
+            csp: {
+                connectDomains: [],
+                resourceDomains: []
+            },
+            domain: widgetDomain
+        },
+        'openai/widgetCSP': {
+            connect_domains: [],
+            resource_domains: []
+        },
+        'openai/widgetDomain': widgetDomain
+    };
+}
 
 export const FILE_PREVIEW_RESOURCE = {
     uri: FILE_PREVIEW_RESOURCE_URI,
@@ -90,11 +110,13 @@ export async function getConfigEditorResourceText(): Promise<string> {
 const READABLE_UI_RESOURCES: Record<string, ReadableUiResource> = {
     [FILE_PREVIEW_RESOURCE_URI]: {
         mimeType: FILE_PREVIEW_RESOURCE.mimeType,
-        getText: getFilePreviewResourceText
+        getText: getFilePreviewResourceText,
+        getMeta: getUiResourceMeta
     },
     [CONFIG_EDITOR_RESOURCE_URI]: {
         mimeType: CONFIG_EDITOR_RESOURCE.mimeType,
-        getText: getConfigEditorResourceText
+        getText: getConfigEditorResourceText,
+        getMeta: getUiResourceMeta
     }
 };
 

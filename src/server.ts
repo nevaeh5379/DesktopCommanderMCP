@@ -24,6 +24,29 @@ const PATH_GUIDANCE = `IMPORTANT: ${getPathGuidance(SYSTEM_INFO)} Relative paths
 
 const CMD_PREFIX_DESCRIPTION = `This command can be referenced as "DC: ..." or "use Desktop Commander to ..." in your instructions.`;
 
+function buildToolOutputSchema(toolName: string) {
+    return {
+        type: 'object' as const,
+        properties: {
+            tool: {
+                type: 'string' as const,
+                enum: [toolName],
+                description: 'Name of the Desktop Commander tool that produced this result.',
+            },
+            summary: {
+                type: 'string' as const,
+                description: 'Concise first-line summary or excerpt of the tool result.',
+            },
+            text: {
+                type: 'string' as const,
+                description: 'Complete textual tool output for model-facing calls.',
+            },
+        },
+        required: ['tool', 'summary'],
+        additionalProperties: true,
+    };
+}
+
 import {
     StartProcessArgsSchema,
     ReadProcessOutputArgsSchema,
@@ -1233,8 +1256,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             }
         ];
 
-        // Filter tools based on current client
-        const filteredTools = allTools.filter(tool => shouldIncludeTool(tool.name));
+        // Filter tools based on current client and advertise a stable structured output envelope.
+        // Tool-specific fields remain allowed so UI resources can keep returning richer metadata.
+        const filteredTools = allTools
+            .filter(tool => shouldIncludeTool(tool.name))
+            .map(tool => ({
+                ...tool,
+                outputSchema: buildToolOutputSchema(tool.name),
+            }));
 
         // logToStderr('debug', `Returning ${filteredTools.length} tools (filtered from ${allTools.length} total) for client: ${currentClient?.name || 'unknown'}`);
 
@@ -1249,6 +1278,48 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 import * as handlers from './handlers/index.js';
 import { ServerResult } from './types.js';
+
+function buildStructuredToolOutput(
+    toolName: string,
+    result: ServerResult,
+    includeText: boolean,
+): Record<string, unknown> {
+    const existing = result.structuredContent;
+    const base = existing && typeof existing === 'object' && !Array.isArray(existing)
+        ? existing
+        : {};
+
+    const textBlocks = result.content
+        .filter((item) => item.type === 'text' && typeof item.text === 'string')
+        .map((item) => item.text as string);
+    const fullText = textBlocks.join('\n');
+    const firstText = textBlocks.find((text) => text.trim().length > 0)?.trim();
+    const firstLine = firstText
+        ? (firstText.split(/\r?\n/, 1)[0] || firstText)
+        : 'Tool completed without a text result.';
+    const summary = firstLine.length > 500
+        ? `${firstLine.slice(0, 497)}...`
+        : firstLine;
+
+    return {
+        ...base,
+        tool: toolName,
+        summary,
+        ...(includeText ? { text: fullText } : {}),
+    };
+}
+
+function ensureStructuredToolOutput(toolName: string, result: ServerResult, args: unknown): ServerResult {
+    if (result.isError) {
+        return result;
+    }
+    const isUiCall = !!args && typeof args === 'object' && !Array.isArray(args)
+        && (args as Record<string, unknown>).origin === 'ui';
+    return {
+        ...result,
+        structuredContent: buildStructuredToolOutput(toolName, result, !isUiCall),
+    };
+}
 
 server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest): Promise<ServerResult> => {
     const args = request.params.arguments;
@@ -1664,7 +1735,7 @@ async function handleCallToolRequest(request: CallToolRequest): Promise<ServerRe
             // Never let the advisory warning break an otherwise-successful call.
         }
 
-        return result;
+        return ensureStructuredToolOutput(name, result, args);
     } catch (error) {
         isError = true;
         const errorMessage = error instanceof Error ? error.message : String(error);
