@@ -20,9 +20,9 @@ try {
 
     for (const tool of tools) {
         assert.equal(tool.outputSchema?.type, 'object', `${tool.name} must advertise an object outputSchema`);
-        assert.deepEqual(tool.outputSchema?.required, ['tool', 'summary']);
-        assert.deepEqual(tool.outputSchema?.properties?.tool?.enum, [tool.name]);
-        assert.equal(tool.outputSchema?.properties?.summary?.type, 'string');
+        assert.equal(tool.outputSchema?.required, undefined);
+        assert.equal(tool.outputSchema?.properties?.tool, undefined);
+        assert.equal(tool.outputSchema?.properties?.summary, undefined);
         assert.equal(tool.outputSchema?.properties?.text?.type, 'string');
     }
 
@@ -31,17 +31,16 @@ try {
         arguments: {},
     });
     assert.equal(listResult.isError, undefined);
-    assert.equal(listResult.structuredContent?.tool, 'list_searches');
-    assert.equal(typeof listResult.structuredContent?.summary, 'string');
-    assert.ok(listResult.structuredContent.summary.length > 0);
+    assert.equal(listResult.structuredContent?.tool, undefined);
+    assert.equal(listResult.structuredContent?.summary, undefined);
 
     const configResult = await client.callTool({
         name: 'get_config',
         arguments: {},
     });
     assert.equal(configResult.isError, undefined);
-    assert.equal(configResult.structuredContent?.tool, 'get_config');
-    assert.equal(typeof configResult.structuredContent?.summary, 'string');
+    assert.equal(configResult.structuredContent?.tool, undefined);
+    assert.equal(configResult.structuredContent?.summary, undefined);
     assert.ok(configResult.structuredContent?.config, 'Existing get_config structured metadata must be preserved');
 
     const packagePath = fileURLToPath(new URL('../package.json', import.meta.url));
@@ -49,8 +48,8 @@ try {
         name: 'read_file',
         arguments: { path: packagePath },
     });
-    assert.equal(readResult.structuredContent?.tool, 'read_file');
-    assert.equal(typeof readResult.structuredContent?.summary, 'string');
+    assert.equal(readResult.structuredContent?.tool, undefined);
+    assert.equal(readResult.structuredContent?.summary, undefined);
     assert.equal(typeof readResult.structuredContent?.text, 'string');
     assert.ok(readResult.structuredContent.text.includes('desktop-commander'));
 
@@ -58,9 +57,9 @@ try {
         name: 'read_file',
         arguments: { path: packagePath, origin: 'ui' },
     });
-    assert.equal(uiReadResult.structuredContent?.tool, 'read_file');
+    assert.equal(uiReadResult.structuredContent?.tool, undefined);
     assert.equal(uiReadResult.structuredContent?.fileName, 'package.json');
-    assert.equal(typeof uiReadResult.structuredContent?.summary, 'string');
+    assert.equal(uiReadResult.structuredContent?.summary, undefined);
     assert.equal(uiReadResult.structuredContent?.text, undefined, 'UI reads must not duplicate file contents');
 
     console.log(`Tool output schema test passed for ${tools.length} tools`);

@@ -8,6 +8,7 @@ export const MCP_UI_SHOW_VARIANT = 'showMCPUi';
 export const MCP_UI_HIDE_VARIANT = 'notShowMCPUi';
 
 export interface McpUiPreviewDecisionDeps {
+  getExplicitPreference: () => Promise<unknown>;
   getExistingAssignment: () => Promise<unknown>;
   isFirstRun: () => boolean;
   wasLoadedFromCache: () => boolean;
@@ -24,6 +25,13 @@ function variantEnablesMcpUi(variant: unknown): boolean | null {
 
 export async function resolveMcpUiPreviewDecision(deps: McpUiPreviewDecisionDeps): Promise<boolean> {
   try {
+    // A user preference is authoritative. Remote experiments may choose a
+    // default experience, but must never override an explicit local opt-out.
+    const explicitPreference = await deps.getExplicitPreference();
+    if (typeof explicitPreference === 'boolean') {
+      return explicitPreference;
+    }
+
     const existingAssignment = await deps.getExistingAssignment();
     const existingDecision = variantEnablesMcpUi(existingAssignment);
     if (existingDecision !== null) {
@@ -67,6 +75,7 @@ export async function resolveMcpUiPreviewDecision(deps: McpUiPreviewDecisionDeps
 
 export async function shouldShowMcpUiPreviews(): Promise<boolean> {
   return resolveMcpUiPreviewDecision({
+    getExplicitPreference: () => configManager.getValue('mcpUiPreviewsEnabled'),
     getExistingAssignment: () => configManager.getValue(`abTest_${MCP_UI_EXPERIMENT_NAME}`),
     isFirstRun: () => configManager.isFirstRun(),
     wasLoadedFromCache: () => featureFlagManager.wasLoadedFromCache(),

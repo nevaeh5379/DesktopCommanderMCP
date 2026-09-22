@@ -24,25 +24,15 @@ const PATH_GUIDANCE = `IMPORTANT: ${getPathGuidance(SYSTEM_INFO)} Relative paths
 
 const CMD_PREFIX_DESCRIPTION = `This command can be referenced as "DC: ..." or "use Desktop Commander to ..." in your instructions.`;
 
-function buildToolOutputSchema(toolName: string) {
+function buildToolOutputSchema() {
     return {
         type: 'object' as const,
         properties: {
-            tool: {
-                type: 'string' as const,
-                enum: [toolName],
-                description: 'Name of the Desktop Commander tool that produced this result.',
-            },
-            summary: {
-                type: 'string' as const,
-                description: 'Concise first-line summary or excerpt of the tool result.',
-            },
             text: {
                 type: 'string' as const,
                 description: 'Complete textual tool output for model-facing calls.',
             },
         },
-        required: ['tool', 'summary'],
         additionalProperties: true,
     };
 }
@@ -338,6 +328,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         - fileReadLineLimit (max lines for read_file, default 1000)
                         - fileWriteLineLimit (max lines per write_file call, default 50)
                         - telemetryEnabled (boolean for telemetry opt-in/out)
+                        - mcpUiPreviewsEnabled (boolean; false disables interactive preview cards)
                         - currentClient (information about the currently connected MCP client)
                         - clientHistory (history of all clients that have connected)
                         - version (version of the DesktopCommander)
@@ -365,6 +356,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                         - fileReadLineLimit (number, max lines for read_file)
                         - fileWriteLineLimit (number, max lines per write_file call)
                         - telemetryEnabled (boolean)
+                        - mcpUiPreviewsEnabled (boolean; false disables interactive preview cards)
                         
                         IMPORTANT: Setting allowedDirectories to an empty array ([]) allows full access 
                         to the entire file system, regardless of the operating system.
@@ -1262,7 +1254,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             .filter(tool => shouldIncludeTool(tool.name))
             .map(tool => ({
                 ...tool,
-                outputSchema: buildToolOutputSchema(tool.name),
+                outputSchema: buildToolOutputSchema(),
             }));
 
         // logToStderr('debug', `Returning ${filteredTools.length} tools (filtered from ${allTools.length} total) for client: ${currentClient?.name || 'unknown'}`);
@@ -1280,7 +1272,6 @@ import * as handlers from './handlers/index.js';
 import { ServerResult } from './types.js';
 
 function buildStructuredToolOutput(
-    toolName: string,
     result: ServerResult,
     includeText: boolean,
 ): Record<string, unknown> {
@@ -1293,23 +1284,14 @@ function buildStructuredToolOutput(
         .filter((item) => item.type === 'text' && typeof item.text === 'string')
         .map((item) => item.text as string);
     const fullText = textBlocks.join('\n');
-    const firstText = textBlocks.find((text) => text.trim().length > 0)?.trim();
-    const firstLine = firstText
-        ? (firstText.split(/\r?\n/, 1)[0] || firstText)
-        : 'Tool completed without a text result.';
-    const summary = firstLine.length > 500
-        ? `${firstLine.slice(0, 497)}...`
-        : firstLine;
 
     return {
         ...base,
-        tool: toolName,
-        summary,
         ...(includeText ? { text: fullText } : {}),
     };
 }
 
-function ensureStructuredToolOutput(toolName: string, result: ServerResult, args: unknown): ServerResult {
+function ensureStructuredToolOutput(result: ServerResult, args: unknown): ServerResult {
     if (result.isError) {
         return result;
     }
@@ -1317,7 +1299,7 @@ function ensureStructuredToolOutput(toolName: string, result: ServerResult, args
         && (args as Record<string, unknown>).origin === 'ui';
     return {
         ...result,
-        structuredContent: buildStructuredToolOutput(toolName, result, !isUiCall),
+        structuredContent: buildStructuredToolOutput(result, !isUiCall),
     };
 }
 
@@ -1735,7 +1717,7 @@ async function handleCallToolRequest(request: CallToolRequest): Promise<ServerRe
             // Never let the advisory warning break an otherwise-successful call.
         }
 
-        return ensureStructuredToolOutput(name, result, args);
+        return ensureStructuredToolOutput(result, args);
     } catch (error) {
         isError = true;
         const errorMessage = error instanceof Error ? error.message : String(error);

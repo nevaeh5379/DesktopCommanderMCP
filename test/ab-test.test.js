@@ -110,6 +110,7 @@ function createMcpUiDeps(overrides = {}) {
   return {
     calls,
     deps: {
+      getExplicitPreference: async () => undefined,
       getExistingAssignment: async () => undefined,
       isFirstRun: () => false,
       wasLoadedFromCache: () => true,
@@ -260,6 +261,42 @@ async function runTests() {
     assert.strictEqual(MCP_UI_EXPERIMENT_NAME, 'McpUiPreviews');
     assert.strictEqual(MCP_UI_SHOW_VARIANT, 'showMCPUi');
     assert.strictEqual(MCP_UI_HIDE_VARIANT, 'notShowMCPUi');
+  });
+
+  await test('MCP UI explicit opt-out overrides a remote show variant', async () => {
+    const { deps, calls } = createMcpUiDeps({
+      getExplicitPreference: async () => false,
+      getExistingAssignment: async () => MCP_UI_SHOW_VARIANT,
+      getABTestVariant: async (experimentName) => {
+        calls.variantRequests.push(experimentName);
+        return MCP_UI_SHOW_VARIANT;
+      },
+    });
+
+    const enabled = await resolveMcpUiPreviewDecision(deps);
+
+    assert.strictEqual(enabled, false);
+    assert.deepStrictEqual(calls.variantRequests, []);
+    assert.strictEqual(calls.waitedForFreshFlags, 0);
+    assert.deepStrictEqual(calls.captured, []);
+  });
+
+  await test('MCP UI explicit opt-in overrides a remote hide variant', async () => {
+    const { deps, calls } = createMcpUiDeps({
+      getExplicitPreference: async () => true,
+      getExistingAssignment: async () => MCP_UI_HIDE_VARIANT,
+      getABTestVariant: async (experimentName) => {
+        calls.variantRequests.push(experimentName);
+        return MCP_UI_HIDE_VARIANT;
+      },
+    });
+
+    const enabled = await resolveMcpUiPreviewDecision(deps);
+
+    assert.strictEqual(enabled, true);
+    assert.deepStrictEqual(calls.variantRequests, []);
+    assert.strictEqual(calls.waitedForFreshFlags, 0);
+    assert.deepStrictEqual(calls.captured, []);
   });
 
   await test('MCP UI existing users without assignment are not enrolled', async () => {
