@@ -8,8 +8,7 @@ import { startProcess, readProcessOutput, interactWithProcess } from '../dist/to
 
 // Helper to extract PID from start result
 function extractPid(result) {
-  const match = result.content[0].text.match(/PID (\d+)/);
-  return match ? parseInt(match[1]) : null;
+  return result.structuredContent?.pid ?? null;
 }
 
 // Helper to wait
@@ -42,14 +41,13 @@ async function testNewOutputBehavior() {
   // Second read should get NEW output only
   const read2 = await readProcessOutput({ pid, timeout_ms: 300 });
   assert(!read2.isError, 'Second read should succeed');
-  const text2 = read2.content[0].text;
+  const text2 = read2.content[0]?.text ?? '';
   
-  // Should NOT re-read tick0 if we already read it
-  // (unless process completed, in which case all output is available)
-  if (text2.includes('Process completed')) {
+  // Should NOT re-read tick0 if we already read it.
+  if (read2.structuredContent?.status === 'finished') {
     console.log('  Process completed - all output available');
   } else {
-    console.log(`  Second read status: ${text2.split('\n')[0]}`);
+    console.log(`  Second read returned ${read2.structuredContent?.pagination?.returnedLines} lines`);
   }
   
   console.log('✅ Test 1 passed: New output behavior works correctly');
@@ -78,7 +76,7 @@ async function testAbsoluteOffset() {
   assert(read.content[0].text.includes('line6'), 'Should contain line6');
   assert(read.content[0].text.includes('line7'), 'Should contain line7');
   assert(!read.content[0].text.includes('line4'), 'Should NOT contain line4');
-  assert(read.content[0].text.includes('from line 5'), 'Status should show reading from line 5');
+  assert.strictEqual(read.structuredContent?.pagination?.readFrom, 5, 'Pagination metadata should show line 5');
   
   console.log('✅ Test 2 passed: Absolute position works correctly');
 }
@@ -106,7 +104,7 @@ async function testTailBehavior() {
   assert(read.content[0].text.includes('line16'), 'Should contain line16');
   assert(read.content[0].text.includes('line19'), 'Should contain line19');
   assert(!read.content[0].text.includes('line15'), 'Should NOT contain line15');
-  assert(read.content[0].text.includes('Reading last'), 'Status should indicate tail read');
+  assert.strictEqual(read.structuredContent?.pagination?.fromEnd, true, 'Pagination metadata should indicate tail read');
   
   console.log('✅ Test 3 passed: Tail behavior works correctly');
 }
@@ -131,11 +129,10 @@ async function testLengthLimit() {
   const read = await readProcessOutput({ pid, offset: 1, length: 10, timeout_ms: 1000 });
   assert(!read.isError, 'Read should succeed');
   
-  const outputText = read.content[0].text;
-  
-  // Should show "remaining" since we're only reading 10 of 100 lines
-  assert(outputText.includes('remaining'), 'Should show remaining lines');
-  assert(outputText.includes('Reading 10 lines'), 'Should indicate reading 10 lines');
+  assert.strictEqual(read.structuredContent?.pagination?.returnedLines, 10,
+    'Pagination metadata should report 10 returned lines');
+  assert.ok(read.structuredContent?.pagination?.remainingLines > 0,
+    'Pagination metadata should report remaining lines');
   
   console.log('✅ Test 4 passed: Length limit works correctly');
 }
@@ -159,8 +156,8 @@ async function testRuntimeInfo() {
   
   const read = await readProcessOutput({ pid, timeout_ms: 1000 });
   assert(!read.isError, 'Read should succeed');
-  assert(read.content[0].text.includes('runtime:'), 'Should show runtime');
-  assert(read.content[0].text.includes('Process completed'), 'Should show completion');
+  assert.strictEqual(read.structuredContent?.status, 'finished', 'Should report completion structurally');
+  assert.equal(typeof read.structuredContent?.runtimeMs, 'number', 'Should report runtime structurally');
   
   console.log('✅ Test 5 passed: Runtime info works correctly');
 }
@@ -197,12 +194,9 @@ async function testInteractTruncation() {
     return;
   }
   
-  const outputText = result.content[0].text;
-  
-  // Check for truncation warning
-  if (outputText.includes('truncated')) {
-    assert(outputText.includes('use read_process_output'), 'Should suggest using read_process_output');
-    console.log('✅ Test 6 passed: Output truncation warning works');
+  if (result.structuredContent?.truncated) {
+    assert.ok(result.structuredContent.hiddenLines > 0, 'Truncation metadata should report hidden lines');
+    console.log('✅ Test 6 passed: Output truncation metadata works');
   } else {
     // If fileReadLineLimit is set higher than 1500, no truncation expected
     console.log('✅ Test 6 passed: Output within limits (no truncation needed)');

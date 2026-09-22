@@ -156,39 +156,23 @@ export class TextFileHandler implements FileHandler {
         return undefined;
     }
 
-    /**
-     * Generate enhanced status message
-     */
-    private generateEnhancedStatusMessage(
-        readLines: number,
+    private createPaginationMetadata(
+        returnedLines: number,
         offset: number,
         totalLines?: number,
-        isNegativeOffset: boolean = false
-    ): string {
-        if (isNegativeOffset) {
-            if (totalLines !== undefined) {
-                return `[Reading last ${readLines} lines (total: ${totalLines} lines)]`;
-            } else {
-                return `[Reading last ${readLines} lines]`;
-            }
-        } else {
-            if (totalLines !== undefined) {
-                const endLine = offset + readLines;
-                const remainingLines = Math.max(0, totalLines - endLine);
+        fromEnd: boolean = false
+    ) {
+        const remainingLines = !fromEnd && totalLines !== undefined
+            ? Math.max(0, totalLines - (offset + returnedLines))
+            : undefined;
 
-                if (offset === 0) {
-                    return `[Reading ${readLines} lines from start (total: ${totalLines} lines, ${remainingLines} remaining)]`;
-                } else {
-                    return `[Reading ${readLines} lines from line ${offset} (total: ${totalLines} lines, ${remainingLines} remaining)]`;
-                }
-            } else {
-                if (offset === 0) {
-                    return `[Reading ${readLines} lines from start]`;
-                } else {
-                    return `[Reading ${readLines} lines from line ${offset}]`;
-                }
-            }
-        }
+        return {
+            offset,
+            returnedLines,
+            ...(totalLines !== undefined ? { totalLines } : {}),
+            ...(remainingLines !== undefined ? { remainingLines } : {}),
+            fromEnd,
+        };
     }
 
     /**
@@ -326,11 +310,14 @@ export class TextFileHandler implements FileHandler {
             }
 
             const result = lines.slice(-n);
-            const content = includeStatusMessage
-                ? `${this.generateEnhancedStatusMessage(result.length, -n, fileTotalLines, true)}\n\n${result.join('\n')}`
-                : result.join('\n');
-
-            return { content, mimeType, metadata: {} };
+            const content = result.join('\n');
+            return {
+                content,
+                mimeType,
+                metadata: {
+                    pagination: this.createPaginationMetadata(result.length, -n, fileTotalLines, true),
+                },
+            };
         } finally {
             await fd.close();
         }
@@ -376,11 +363,14 @@ export class TextFileHandler implements FileHandler {
             result = buffer.slice(0, totalLines);
         }
 
-        const content = includeStatusMessage
-            ? `${this.generateEnhancedStatusMessage(result.length, -requestedLines, fileTotalLines, true)}\n\n${result.join('\n')}`
-            : result.join('\n');
-
-        return { content, mimeType, metadata: {} };
+        const content = result.join('\n');
+        return {
+            content,
+            mimeType,
+            metadata: {
+                pagination: this.createPaginationMetadata(result.length, -requestedLines, fileTotalLines, true),
+            },
+        };
     }
 
     /**
@@ -415,14 +405,14 @@ export class TextFileHandler implements FileHandler {
 
         rl.close();
 
-        if (includeStatusMessage) {
-            const statusMessage = this.generateEnhancedStatusMessage(result.length, offset, fileTotalLines, false);
-            const content = `${statusMessage}\n\n${result.join('\n')}`;
-            return { content, mimeType, metadata: {} };
-        } else {
-            const content = result.join('\n');
-            return { content, mimeType, metadata: {} };
-        }
+        const content = result.join('\n');
+        return {
+            content,
+            mimeType,
+            metadata: {
+                pagination: this.createPaginationMetadata(result.length, offset, fileTotalLines, false),
+            },
+        };
     }
 
     /**
@@ -491,11 +481,14 @@ export class TextFileHandler implements FileHandler {
 
             rl2.close();
 
-            const content = includeStatusMessage
-                ? `${this.generateEnhancedStatusMessage(result.length, offset, fileTotalLines, false)}\n\n${result.join('\n')}`
-                : result.join('\n');
-
-            return { content, mimeType, metadata: {} };
+            const content = result.join('\n');
+            return {
+                content,
+                mimeType,
+                metadata: {
+                    pagination: this.createPaginationMetadata(result.length, offset, fileTotalLines, false),
+                },
+            };
         } finally {
             await fd.close();
         }

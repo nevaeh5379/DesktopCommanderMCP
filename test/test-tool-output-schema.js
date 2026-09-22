@@ -26,6 +26,15 @@ try {
         assert.equal(tool.outputSchema?.properties?.text?.type, 'string');
     }
 
+    const readTool = tools.find((tool) => tool.name === 'read_file');
+    assert.equal(readTool?.outputSchema?.properties?.pagination?.type, 'object');
+    const startTool = tools.find((tool) => tool.name === 'start_process');
+    assert.equal(startTool?.outputSchema?.properties?.pid?.type, 'number');
+    assert.equal(startTool?.outputSchema?.properties?.status?.type, 'string');
+    const writeTool = tools.find((tool) => tool.name === 'write_file');
+    assert.equal(writeTool?.outputSchema?.properties?.path?.type, 'string');
+    assert.equal(writeTool?.outputSchema?.properties?.lineCount?.type, 'number');
+
     const listResult = await client.callTool({
         name: 'list_searches',
         arguments: {},
@@ -46,12 +55,18 @@ try {
     const packagePath = fileURLToPath(new URL('../package.json', import.meta.url));
     const readResult = await client.callTool({
         name: 'read_file',
-        arguments: { path: packagePath },
+        arguments: { path: packagePath, offset: 0, length: 2 },
     });
     assert.equal(readResult.structuredContent?.tool, undefined);
     assert.equal(readResult.structuredContent?.summary, undefined);
     assert.equal(typeof readResult.structuredContent?.text, 'string');
     assert.ok(readResult.structuredContent.text.includes('desktop-commander'));
+    assert.ok(!readResult.structuredContent.text.startsWith('[Reading'),
+        'read_file text should contain only file content');
+    assert.deepEqual(readResult.structuredContent?.pagination?.offset, 0);
+    assert.deepEqual(readResult.structuredContent?.pagination?.returnedLines, 2);
+    assert.equal(readResult.structuredContent?.pagination?.fromEnd, false);
+    assert.ok(readResult.structuredContent?.pagination?.totalLines > 2);
 
     const uiReadResult = await client.callTool({
         name: 'read_file',
@@ -61,6 +76,15 @@ try {
     assert.equal(uiReadResult.structuredContent?.fileName, 'package.json');
     assert.equal(uiReadResult.structuredContent?.summary, undefined);
     assert.equal(uiReadResult.structuredContent?.text, undefined, 'UI reads must not duplicate file contents');
+    assert.equal(uiReadResult.structuredContent?.pagination?.offset, 0);
+
+    const processResult = await client.callTool({
+        name: 'start_process',
+        arguments: { command: 'printf schema-output', timeout_ms: 5000 },
+    });
+    assert.equal(typeof processResult.structuredContent?.pid, 'number');
+    assert.equal(processResult.structuredContent?.status, 'finished');
+    assert.equal(processResult.structuredContent?.text, 'schema-output');
 
     console.log(`Tool output schema test passed for ${tools.length} tools`);
 } finally {

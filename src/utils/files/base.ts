@@ -110,6 +110,19 @@ export interface FileResult {
 /**
  * File-type specific metadata
  */
+export interface FilePaginationMetadata {
+    /** Requested zero-based offset. Negative values mean tail reads. */
+    offset: number;
+    /** Number of lines returned in this read. */
+    returnedLines: number;
+    /** Total file line count when it was cheap enough to determine. */
+    totalLines?: number;
+    /** Lines remaining after this page for forward reads. */
+    remainingLines?: number;
+    /** Whether this page was read from the end of the file. */
+    fromEnd: boolean;
+}
+
 export interface FileMetadata {
     /** For images */
     isImage?: boolean;
@@ -128,6 +141,7 @@ export interface FileMetadata {
 
     /** For text files */
     lineCount?: number;
+    pagination?: FilePaginationMetadata;
 
     /** For PDF files */
     isPdf?: boolean;

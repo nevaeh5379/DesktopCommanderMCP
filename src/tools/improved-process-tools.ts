@@ -1,9 +1,9 @@
-import { terminalManager, MAX_BUFFERED_OUTPUT_CHARS } from '../terminal-manager.js';
+import { terminalManager } from '../terminal-manager.js';
 import { commandManager } from '../command-manager.js';
 import { StartProcessArgsSchema, ReadProcessOutputArgsSchema, InteractWithProcessArgsSchema, ForceTerminateArgsSchema, ListSessionsArgsSchema } from './schemas.js';
 import { capture } from "../utils/capture.js";
 import { ServerResult } from '../types.js';
-import { analyzeProcessState, cleanProcessOutput, formatProcessStateMessage, ProcessState } from '../utils/process-detection.js';
+import { analyzeProcessState, cleanProcessOutput, ProcessState } from '../utils/process-detection.js';
 import * as os from 'os';
 import { configManager } from '../config-manager.js';
 import { spawn } from 'child_process';
@@ -182,57 +182,29 @@ export async function startProcess(args: unknown): Promise<ServerResult> {
     };
   }
 
-  // Analyze the process state to detect if it's waiting for input
+  // Analyze the process state so callers know whether the PID can be
+  // interacted with or should only be used to re-read completed output.
   const processState = analyzeProcessState(result.output, result.pid);
 
-  let statusMessage = '';
+  let status: 'waiting for input' | 'finished' | 'running';
   if (processState.isWaitingForInput) {
-    statusMessage = `\n🔄 ${formatProcessStateMessage(processState, result.pid)}`;
-  } else if (processState.isFinished) {
-    statusMessage = `\n✅ ${formatProcessStateMessage(processState, result.pid)}`;
-  } else if (result.isBlocked) {
-    statusMessage = '\n⏳ Process is running. Use read_process_output to get more output.';
-  }
-
-  // Add timing information if requested
-  let timingMessage = '';
-  if (result.timingInfo) {
-    timingMessage = formatTimingInfo(result.timingInfo);
+    status = 'waiting for input';
+  } else if (!result.isBlocked || processState.isFinished) {
+    status = 'finished';
+  } else {
+    status = 'running';
   }
 
   return {
-    content: [{
-      type: "text",
-      text: `Process started with PID ${result.pid} (shell: ${shellUsed})\nInitial output:\n${result.output}${statusMessage}${timingMessage}`
-    }],
+    content: result.output.length > 0
+      ? [{ type: "text", text: result.output }]
+      : [],
+    structuredContent: {
+      pid: result.pid,
+      status,
+      ...(result.timingInfo ? { timing: result.timingInfo } : {}),
+    },
   };
-}
-
-function formatTimingInfo(timing: any): string {
-  let msg = '\n\n📊 Timing Information:\n';
-  msg += `  Exit Reason: ${timing.exitReason}\n`;
-  msg += `  Total Duration: ${timing.totalDurationMs}ms\n`;
-
-  if (timing.timeToFirstOutputMs !== undefined) {
-    msg += `  Time to First Output: ${timing.timeToFirstOutputMs}ms\n`;
-  }
-
-  if (timing.firstOutputTime && timing.lastOutputTime) {
-    msg += `  Output Window: ${timing.lastOutputTime - timing.firstOutputTime}ms\n`;
-  }
-
-  if (timing.outputEvents && timing.outputEvents.length > 0) {
-    msg += `\n  Output Events (${timing.outputEvents.length} total):\n`;
-    timing.outputEvents.forEach((event: any, idx: number) => {
-      msg += `    [${idx + 1}] +${event.deltaMs}ms | ${event.source} | ${event.length}b`;
-      if (event.matchedPattern) {
-        msg += ` | 🎯 ${event.matchedPattern}`;
-      }
-      msg += `\n       "${event.snippet}"\n`;
-    });
-  }
-
-  return msg;
 }
 
 /**
@@ -320,64 +292,45 @@ export async function readProcessOutput(args: unknown): Promise<ServerResult> {
     };
   }
 
-  // Join lines back into string
   const output = result.lines.join('\n');
 
-  // Generate status message similar to file reading
-  let statusMessage = '';
-  if (offset < 0) {
-    // Tail read - match file reading format for consistency
-    statusMessage = `[Reading last ${result.readCount} lines (total: ${result.totalLines} lines)]`;
-  } else if (offset === 0) {
-    // "New output" read
-    if (result.remaining > 0) {
-      statusMessage = `[Reading ${result.readCount} new lines from line ${result.readFrom} (total: ${result.totalLines} lines, ${result.remaining} remaining)]`;
-    } else {
-      statusMessage = `[Reading ${result.readCount} new lines (total: ${result.totalLines} lines)]`;
-    }
-  } else {
-    // Absolute position read
-    statusMessage = `[Reading ${result.readCount} lines from line ${result.readFrom} (total: ${result.totalLines} lines, ${result.remaining} remaining)]`;
-  }
+  let status: 'waiting for input' | 'finished' | 'running' = result.isComplete
+    ? 'finished'
+    : 'running';
 
-  // Surface buffer-cap eviction so the model knows the retained output is not
-  // the full output and that line numbers shifted (matches the truncation
-  // markers used by other tools).
-  if (result.evictedLines && result.evictedLines > 0) {
-    const capMB = Math.round(MAX_BUFFERED_OUTPUT_CHARS / 1024 / 1024);
-    statusMessage += `\n[WARNING: output exceeded the ${capMB}MB buffer cap; the ${result.evictedLines} earliest lines were evicted and cannot be read. Line numbers and totals refer to the retained buffer only]`;
-  }
-
-  // Add process state info
-  let processStateMessage = '';
-  if (result.isComplete) {
-    const runtimeStr = result.runtimeMs !== undefined 
-      ? ` (runtime: ${(result.runtimeMs / 1000).toFixed(2)}s)` 
-      : '';
-    processStateMessage = `\n✅ Process completed with exit code ${result.exitCode}${runtimeStr}`;
-  } else if (session) {
-    // Analyze state for running processes
+  if (!result.isComplete && session) {
     const fullOutput = session.outputLines.join('\n');
     const processState = analyzeProcessState(fullOutput, pid);
     if (processState.isWaitingForInput) {
-      processStateMessage = `\n🔄 ${formatProcessStateMessage(processState, pid)}`;
+      status = 'waiting for input';
     }
   }
 
-  // Add timing information if requested
-  let timingMessage = '';
-  if (verbose_timing) {
-    const endTime = Date.now();
-    timingMessage = `\n\n📊 Timing: ${endTime - startTime}ms`;
-  }
-
-  const responseText = output || '(No output in requested range)';
-
   return {
-    content: [{
-      type: "text",
-      text: `${statusMessage}\n\n${responseText}${processStateMessage}${timingMessage}`
-    }],
+    content: output.length > 0
+      ? [{ type: "text", text: output }]
+      : [],
+    structuredContent: {
+      pid,
+      status,
+      pagination: {
+        offset,
+        readFrom: result.readFrom,
+        returnedLines: result.readCount,
+        totalLines: result.totalLines,
+        remainingLines: result.remaining,
+        fromEnd: offset < 0,
+        newOnly: offset === 0,
+        ...(result.evictedLines ? { evictedLines: result.evictedLines } : {}),
+      },
+      ...(result.isComplete ? {
+        exitCode: result.exitCode,
+        ...(result.runtimeMs !== undefined ? { runtimeMs: result.runtimeMs } : {}),
+      } : {}),
+      ...(verbose_timing ? {
+        timing: { totalDurationMs: Date.now() - startTime },
+      } : {}),
+    },
   };
 }
 
@@ -449,29 +402,25 @@ export async function interactWithProcess(args: unknown): Promise<ServerResult> 
       };
     }
 
-    // If not waiting for response, return immediately
+    // If not waiting for response, there is no process output to return yet.
     if (!wait_for_prompt) {
       exitReason = 'no_wait';
-      let timingMessage = '';
-      if (verbose_timing) {
-        const endTime = Date.now();
-        const timingInfo = {
-          startTime,
-          endTime,
-          totalDurationMs: endTime - startTime,
-          exitReason,
-          firstOutputTime,
-          lastOutputTime,
-          timeToFirstOutputMs: undefined,
-          outputEvents: undefined
-        };
-        timingMessage = formatTimingInfo(timingInfo);
-      }
+      const timing = verbose_timing
+        ? {
+            startTime,
+            endTime: Date.now(),
+            totalDurationMs: Date.now() - startTime,
+            exitReason,
+          }
+        : undefined;
+
       return {
-        content: [{
-          type: "text",
-          text: `✅ Input sent to process ${pid}. Use read_process_output to get the response.${timingMessage}`
-        }],
+        content: [],
+        structuredContent: {
+          pid,
+          status: 'input sent',
+          ...(timing ? { timing } : {}),
+        },
       };
     }
 
@@ -561,86 +510,54 @@ export async function interactWithProcess(args: unknown): Promise<ServerResult> 
     
     await waitForResponse();
 
-    // Clean and format output
     let cleanOutput = cleanProcessOutput(output, input);
     const timeoutReached = !earlyExit && !processState?.isFinished && !processState?.isWaitingForInput;
-    
-    // Apply output line limit to prevent context overflow
-    let truncationMessage = '';
-    const outputLines = cleanOutput.split('\n');
-    if (outputLines.length > maxOutputLines) {
-      const truncatedLines = outputLines.slice(0, maxOutputLines);
-      cleanOutput = truncatedLines.join('\n');
-      const remainingLines = outputLines.length - maxOutputLines;
-      truncationMessage = `\n\n⚠️ Output truncated: showing ${maxOutputLines} of ${outputLines.length} lines (${remainingLines} hidden). Use read_process_output with offset/length for full output.`;
+
+    const outputLines = cleanOutput.length > 0 ? cleanOutput.split('\n') : [];
+    const totalLines = outputLines.length;
+    const hiddenLines = Math.max(0, totalLines - maxOutputLines);
+    if (hiddenLines > 0) {
+      cleanOutput = outputLines.slice(0, maxOutputLines).join('\n');
     }
-    
-    // Determine final state
+
     if (!processState) {
       processState = analyzeProcessState(output, pid);
     }
-    
-    let statusMessage = '';
-    if (processState.isWaitingForInput) {
-      statusMessage = `\n🔄 ${formatProcessStateMessage(processState, pid)}`;
-    } else if (processState.isFinished) {
-      statusMessage = `\n✅ ${formatProcessStateMessage(processState, pid)}`;
-    } else if (timeoutReached) {
-      statusMessage = '\n⏱️ Response may be incomplete (timeout reached)';
-    }
 
-    // Add timing information if requested
-    let timingMessage = '';
-    if (verbose_timing) {
-      const endTime = Date.now();
-      const timingInfo = {
-        startTime,
-        endTime,
-        totalDurationMs: endTime - startTime,
-        exitReason,
-        firstOutputTime,
-        lastOutputTime,
-        timeToFirstOutputMs: firstOutputTime ? firstOutputTime - startTime : undefined,
-        outputEvents: outputEvents.length > 0 ? outputEvents : undefined
-      };
-      timingMessage = formatTimingInfo(timingInfo);
-    }
+    const status = processState.isWaitingForInput
+      ? 'waiting for input'
+      : processState.isFinished
+        ? 'finished'
+        : timeoutReached
+          ? 'timeout'
+          : 'running';
 
-    if (cleanOutput.trim().length === 0 && !timeoutReached) {
-      return {
-        content: [{
-          type: "text",
-          text: `✅ Input executed in process ${pid}.\n📭 (No output produced)${statusMessage}${timingMessage}`
-        }],
-      };
-    }
-
-    // Format response with better structure and consistent emojis
-    let responseText = `✅ Input executed in process ${pid}`;
-
-    if (cleanOutput && cleanOutput.trim().length > 0) {
-      responseText += `:\n\n📤 Output:\n${cleanOutput}`;
-    } else {
-      responseText += `.\n📭 (No output produced)`;
-    }
-
-    if (statusMessage) {
-      responseText += `\n\n${statusMessage}`;
-    }
-
-    if (truncationMessage) {
-      responseText += truncationMessage;
-    }
-
-    if (timingMessage) {
-      responseText += timingMessage;
-    }
+    const timing = verbose_timing
+      ? {
+          startTime,
+          endTime: Date.now(),
+          totalDurationMs: Date.now() - startTime,
+          exitReason,
+          firstOutputTime,
+          lastOutputTime,
+          timeToFirstOutputMs: firstOutputTime ? firstOutputTime - startTime : undefined,
+          outputEvents: outputEvents.length > 0 ? outputEvents : undefined,
+        }
+      : undefined;
 
     return {
-      content: [{
-        type: "text",
-        text: responseText
-      }],
+      content: cleanOutput.length > 0
+        ? [{ type: "text", text: cleanOutput }]
+        : [],
+      structuredContent: {
+        pid,
+        status,
+        truncated: hiddenLines > 0,
+        returnedLines: Math.min(totalLines, maxOutputLines),
+        totalLines,
+        hiddenLines,
+        ...(timing ? { timing } : {}),
+      },
     };
     
   } catch (error) {

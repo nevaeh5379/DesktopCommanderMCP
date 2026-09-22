@@ -208,14 +208,22 @@ export async function handleReadFile(args: unknown): Promise<ServerResult> {
             if (parsed.origin === 'ui' && fileType === 'directory') {
                 textContent = textContent.replace(/^This is a directory, not a file\.[^\n]*\n+/, '');
             }
+            const pagination = fileResult.metadata?.pagination;
+            const previewMetadata = parsed.origin === 'ui'
+                ? {
+                    fileName: path.basename(resolvedFilePath),
+                    filePath: resolvedFilePath,
+                    fileType,
+                    ...await getDefaultEditorMetadata(resolvedFilePath),
+                }
+                : {};
+
             return {
                 content: [{ type: "text", text: textContent }],
-                ...(parsed.origin === 'ui' ? {
+                ...(pagination || parsed.origin === 'ui' ? {
                     structuredContent: {
-                        fileName: path.basename(resolvedFilePath),
-                        filePath: resolvedFilePath,
-                        fileType,
-                        ...await getDefaultEditorMetadata(resolvedFilePath),
+                        ...previewMetadata,
+                        ...(pagination ? { pagination } : {}),
                     },
                 } : {}),
             };
@@ -331,33 +339,18 @@ export async function handleWriteFile(args: unknown): Promise<ServerResult> {
             }
         }
 
-        // Get the line limit from configuration
-        const config = await configManager.getConfig();
-        const MAX_LINES = config.fileWriteLineLimit ?? 50; // Default to 50 if not set
-
-        // Strictly enforce line count limit
-        const lines = parsed.content.split('\n');
-        const lineCount = lines.length;
-        let errorMessage = "";
-        if (lineCount > MAX_LINES) {
-            errorMessage = `✅ File written successfully! (${lineCount} lines)
-            
-💡 Performance tip: For optimal speed, consider chunking files into ≤30 line pieces in future operations.`;
-        }
+        const lineCount = parsed.content.split('\n').length;
 
         // Pass the mode parameter to writeFile
         await writeFile(parsed.path, parsed.content, parsed.mode);
 
-        // Provide more informative message based on mode
-        const modeMessage = parsed.mode === 'append' ? 'appended to' : 'wrote to';
-
-        // No structuredContent: nothing in the UI calls write_file (the widget
-        // previews the write via its own read_file pull at tool-result time).
         return {
-            content: [{
-                type: "text",
-                text: `Successfully ${modeMessage} ${parsed.path} (${lineCount} lines) ${errorMessage}`
-            }],
+            content: [],
+            structuredContent: {
+                path: parsed.path,
+                mode: parsed.mode,
+                lineCount,
+            },
         };
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

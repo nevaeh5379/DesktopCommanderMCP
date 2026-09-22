@@ -24,15 +24,68 @@ const PATH_GUIDANCE = `IMPORTANT: ${getPathGuidance(SYSTEM_INFO)} Relative paths
 
 const CMD_PREFIX_DESCRIPTION = `This command can be referenced as "DC: ..." or "use Desktop Commander to ..." in your instructions.`;
 
-function buildToolOutputSchema() {
+function buildToolOutputSchema(toolName: string) {
+    const properties: Record<string, unknown> = {
+        text: {
+            type: 'string' as const,
+            description: 'Raw textual output only, without status or pagination metadata.',
+        },
+    };
+
+    switch (toolName) {
+        case 'read_file':
+            properties.pagination = {
+                type: 'object' as const,
+                properties: {
+                    offset: { type: 'number' as const },
+                    returnedLines: { type: 'number' as const },
+                    totalLines: { type: 'number' as const },
+                    remainingLines: { type: 'number' as const },
+                    fromEnd: { type: 'boolean' as const },
+                },
+                required: ['offset', 'returnedLines', 'fromEnd'],
+                additionalProperties: false,
+            };
+            break;
+        case 'start_process':
+        case 'read_process_output':
+            properties.pid = { type: 'number' as const };
+            properties.status = {
+                type: 'string' as const,
+                enum: ['waiting for input', 'finished', 'running'],
+            };
+            properties.timing = { type: 'object' as const, additionalProperties: true };
+            if (toolName === 'read_process_output') {
+                properties.pagination = {
+                    type: 'object' as const,
+                    additionalProperties: true,
+                };
+                properties.exitCode = { type: ['number', 'null'] as const };
+                properties.runtimeMs = { type: 'number' as const };
+            }
+            break;
+        case 'interact_with_process':
+            properties.pid = { type: 'number' as const };
+            properties.status = {
+                type: 'string' as const,
+                enum: ['input sent', 'waiting for input', 'finished', 'running', 'timeout'],
+            };
+            properties.truncated = { type: 'boolean' as const };
+            properties.returnedLines = { type: 'number' as const };
+            properties.totalLines = { type: 'number' as const };
+            properties.hiddenLines = { type: 'number' as const };
+            properties.timing = { type: 'object' as const, additionalProperties: true };
+            break;
+        case 'write_file':
+            properties.path = { type: 'string' as const };
+            properties.mode = { type: 'string' as const, enum: ['rewrite', 'append'] };
+            properties.lineCount = { type: 'number' as const };
+            break;
+    }
+
     return {
         type: 'object' as const,
-        properties: {
-            text: {
-                type: 'string' as const,
-                description: 'Complete textual tool output for model-facing calls.',
-            },
-        },
+        properties,
         additionalProperties: true,
     };
 }
@@ -1254,7 +1307,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             .filter(tool => shouldIncludeTool(tool.name))
             .map(tool => ({
                 ...tool,
-                outputSchema: buildToolOutputSchema(),
+                outputSchema: buildToolOutputSchema(tool.name),
             }));
 
         // logToStderr('debug', `Returning ${filteredTools.length} tools (filtered from ${allTools.length} total) for client: ${currentClient?.name || 'unknown'}`);
@@ -1287,7 +1340,7 @@ function buildStructuredToolOutput(
 
     return {
         ...base,
-        ...(includeText ? { text: fullText } : {}),
+        ...(includeText && fullText.length > 0 ? { text: fullText } : {}),
     };
 }
 

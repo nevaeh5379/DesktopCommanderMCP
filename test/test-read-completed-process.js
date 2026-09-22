@@ -18,10 +18,8 @@ async function testReadCompletedProcessOutput() {
     timeout_ms: 500  // Returns before the output happens
   });
   
-  // Extract PID
-  const pidMatch = startResult.content[0].text.match(/Process started with PID (\d+)/);
-  assert(pidMatch, 'Should get PID from start_process');
-  const pid = parseInt(pidMatch[1]);
+  const pid = startResult.structuredContent?.pid;
+  assert(pid, 'Should get PID from start_process structured content');
   
   // Wait for the actual command to complete
   await new Promise(resolve => setTimeout(resolve, 2000));
@@ -52,10 +50,12 @@ async function testImmediateCompletion() {
     timeout_ms: 2000
   });
   
-  // Extract PID
-  const pidMatch = startResult.content[0].text.match(/Process started with PID (\d+)/);
-  assert(pidMatch, 'Should get PID from start_process');
-  const pid = parseInt(pidMatch[1]);
+  const pid = startResult.structuredContent?.pid;
+  assert(pid, 'Should get PID from start_process structured content');
+  assert.strictEqual(startResult.structuredContent?.status, 'finished',
+    'Immediate completion should report finished status structurally');
+  assert.strictEqual(startResult.content[0]?.text, 'IMMEDIATE OUTPUT\n',
+    'start_process text should contain only raw process output');
   
   // Small delay to ensure process completed
   await new Promise(resolve => setTimeout(resolve, 100));

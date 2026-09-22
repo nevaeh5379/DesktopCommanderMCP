@@ -42,9 +42,7 @@ async function testEnhancedREPL() {
   
   console.log('Result from start_process:', result);
   
-  // Extract PID from the result text
-  const pidMatch = result.content[0].text.match(/Process started with PID (\d+)/);
-  const pid = pidMatch ? parseInt(pidMatch[1]) : null;
+  const pid = result.structuredContent?.pid;
   
   if (!pid) {
     console.error("Failed to get PID from Python process");

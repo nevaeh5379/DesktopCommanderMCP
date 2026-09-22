@@ -286,13 +286,11 @@ async function testWriteModes() {
 /**
  * Test 9: read_file preview contract.
  *
- * Since the pull-by-path preview refactor, structuredContent is widget-only:
- * it is returned ONLY on origin:'ui' calls (the preview widget's own RPC
- * reads) and carries metadata only (no content duplication, no sourceTool —
- * the widget stamps that client-side). LLM-facing calls carry the full
- * content in content[] and no structuredContent at all. Image ui-reads
- * return the base64 in a text block (an image block would make the host
- * inline-render the RPC response and stall the widget).
+ * Text reads keep the file body in content[] while pagination metadata lives
+ * in structuredContent. Widget reads add preview metadata to that same
+ * structured payload without duplicating the file body. Image ui-reads return
+ * the base64 in a text block (an image block would make the host inline-render
+ * the RPC response and stall the widget).
  */
 async function testReadFilePreviewMetadata() {
   console.log('\n--- Test 9: read_file preview structured content ---');
@@ -308,15 +306,16 @@ async function testReadFilePreviewMetadata() {
   await fs.writeFile(IMAGE_FILE, Buffer.from(tinyPngBase64, 'base64'));
   await fs.writeFile(SVG_FILE, tinySvg);
 
-  // LLM-facing reads: full content in content[], no structuredContent.
+  // LLM-facing text reads: body stays pure; pagination is structured metadata.
   const markdownResult = await handleReadFile({ path: MD_FILE });
   assert.ok(Array.isArray(markdownResult.content), 'Result should include content array');
-  assert.ok(markdownResult.content[0].text.includes(markdownContent), 'Content should include markdown body');
-  assert.strictEqual(markdownResult.structuredContent, undefined, 'LLM-facing read should carry no structuredContent');
+  assert.strictEqual(markdownResult.content[0].text, markdownContent, 'Content should contain only the markdown body');
+  assert.strictEqual(markdownResult.structuredContent?.pagination?.offset, 0);
+  assert.strictEqual(markdownResult.structuredContent?.pagination?.returnedLines, 5);
 
   const textResult = await handleReadFile({ path: TEXT_FILE });
-  assert.ok(textResult.content[0].text.includes(textContent), 'Content should include text body');
-  assert.strictEqual(textResult.structuredContent, undefined, 'LLM-facing read should carry no structuredContent');
+  assert.strictEqual(textResult.content[0].text, textContent, 'Content should contain only the text body');
+  assert.strictEqual(textResult.structuredContent?.pagination?.returnedLines, 2);
 
   // Widget (origin:'ui') reads: same content plus metadata-only structuredContent.
   const uiMarkdownResult = await handleReadFile({ path: MD_FILE, origin: 'ui' });
@@ -357,11 +356,19 @@ async function testReadFilePreviewMetadata() {
   assert.ok(!uiSvgResult.content.some((item) => item.type === 'image'), 'ui SVG read must not include an image block');
   assert.ok(uiSvgResult.content[0].text.length > 0, 'ui SVG read should carry base64 in a text block');
 
-  // write_file never returns structuredContent (nothing in the UI calls it;
-  // the widget previews writes via its own read_file pull).
+  // write_file has no textual output; write metadata is structured.
   const writeResult = await handleWriteFile({ path: TEXT_FILE, content: 'written through handler', mode: 'rewrite' });
-  assert.strictEqual(writeResult.structuredContent, undefined, 'write_file should carry no structuredContent');
-  assert.ok(writeResult.content[0].text.includes('Successfully'), 'write_file should confirm the write');
+  assert.deepStrictEqual(writeResult.content, [], 'write_file should not emit redundant confirmation text');
+  assert.deepStrictEqual(writeResult.structuredContent, {
+    path: TEXT_FILE,
+    mode: 'rewrite',
+    lineCount: 1,
+  }, 'write_file should report write metadata structurally');
+
+  const longContent = Array.from({ length: 51 }, (_, i) => `line ${i + 1}`).join('\n');
+  const longWriteResult = await handleWriteFile({ path: TEXT_FILE, content: longContent, mode: 'rewrite' });
+  assert.strictEqual(longWriteResult.structuredContent?.lineCount, 51,
+    'large writes should report line count structurally without repeated guidance');
 
   const nullArgsResult = await handleReadFile(null);
   assert.ok(Array.isArray(nullArgsResult.content), 'Null-args result should include content array');
