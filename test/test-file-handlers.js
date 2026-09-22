@@ -398,13 +398,12 @@ async function testMarkdownExactMatchSave() {
 
   assert.ok(Array.isArray(result.content), 'edit_block result should include content array');
   assert.strictEqual(result.content[0].type, 'text', 'edit_block result[0] should be text');
-  assert.match(
-    result.content[0].text,
-    /\[Reading \d+ lines? from/,
-    'edit_block should return a file-preview status line'
-  );
-  // structuredContent is widget-only: LLM-facing edit_block calls omit it.
-  assert.strictEqual(result.structuredContent, undefined, 'LLM-facing edit_block should carry no structuredContent');
+  assert.ok(!result.content[0].text.startsWith('[Reading'),
+    'edit_block text should contain only the file preview');
+  assert.ok(result.content[0].text.includes('Updated paragraph.'),
+    'edit_block text should contain the edited preview');
+  assert.strictEqual(result.structuredContent?.pagination?.offset, 0);
+  assert.equal(typeof result.structuredContent?.pagination?.returnedLines, 'number');
 
   const readBack = await fs.readFile(MD_FILE, 'utf8');
   assert.strictEqual(readBack, updatedContent, 'Markdown file should be rewritten with the updated content');

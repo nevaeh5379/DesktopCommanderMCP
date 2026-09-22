@@ -156,8 +156,13 @@ async function testExactNumberOfOccurrences() {
     // Check that the operation succeeded
     assert.strictEqual(result.content[0].type, 'text', 'Result should be text');
     assert.ok(
-      result.content[0].text.includes('Successfully applied 4 edits'),
-      'Should report success with the correct number of edits'
+      result.content[0].text.includes('This line has been replaced correctly.'),
+      'Preview should contain the edited content'
+    );
+    assert.equal(
+      typeof result.structuredContent?.pagination?.returnedLines,
+      'number',
+      'Edit preview pagination should be structured'
     );
     
     // Verify the file content
@@ -200,9 +205,10 @@ This is a MODIFIED target line in the header.`,
     // Check that the operation succeeded
     assert.strictEqual(result.content[0].type, 'text', 'Result should be text');
     assert.ok(
-      result.content[0].text.includes('Successfully applied 1 edit'),
-      'Should report success with the header edit'
+      result.content[0].text.includes('This is a MODIFIED target line in the header.'),
+      'Preview should contain the header edit'
     );
+    assert.equal(typeof result.structuredContent?.pagination?.returnedLines, 'number');
     
     // Target the occurrence in the footer section using context
     result = await handleEditBlock({
@@ -217,9 +223,10 @@ This is a MODIFIED target line in the footer.`,
     // Check that the operation succeeded
     assert.strictEqual(result.content[0].type, 'text', 'Result should be text');
     assert.ok(
-      result.content[0].text.includes('Successfully applied 1 edit'),
-      'Should report success with the footer edit'
+      result.content[0].text.includes('This is a MODIFIED target line in the footer.'),
+      'Preview should contain the footer edit'
     );
+    assert.equal(typeof result.structuredContent?.pagination?.returnedLines, 'number');
     
     // Verify the file content
     const fileContent = await fs.readFile(CONTEXT_TEST_FILE, 'utf8');

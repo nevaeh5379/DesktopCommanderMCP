@@ -28,6 +28,8 @@ try {
 
     const readTool = tools.find((tool) => tool.name === 'read_file');
     assert.equal(readTool?.outputSchema?.properties?.pagination?.type, 'object');
+    const editTool = tools.find((tool) => tool.name === 'edit_block');
+    assert.equal(editTool?.outputSchema?.properties?.pagination?.type, 'object');
     const startTool = tools.find((tool) => tool.name === 'start_process');
     assert.equal(startTool?.outputSchema?.properties?.pid?.type, 'number');
     assert.equal(startTool?.outputSchema?.properties?.status?.type, 'string');

@@ -215,26 +215,31 @@ RECOMMENDATION: For large search/replace operations, consider breaking them into
         const previewEnd = Math.min(totalLines, changeStartLine + changeLineCount + contextLines);
         const previewContent = newLines.slice(previewStart, previewEnd).join('\n');
         const previewLineCount = previewEnd - previewStart;
-        const remaining = totalLines - previewEnd;
-        const statusLine = `[Reading ${previewLineCount} lines from ${previewStart === 0 ? 'start' : `line ${previewStart}`} (total: ${totalLines} lines, ${remaining} remaining)]\n\n`;
+        const remainingLines = totalLines - previewEnd;
+        const previewMetadata = origin === 'ui'
+            ? {
+                fileName: path.basename(resolvedEditPath),
+                filePath: resolvedEditPath,
+                fileType: resolvePreviewFileType(resolvedEditPath),
+                ...await getDefaultEditorMetadata(resolvedEditPath),
+            }
+            : {};
 
         return {
             content: [{
                 type: "text",
-                text: `${statusLine}${previewContent}`
+                text: previewContent
             }],
-            // structuredContent only travels on widget-initiated calls: it is the
-            // widget's save-success signal (assertSuccessfulEditBlockResult) and
-            // metadata source. LLM-facing responses don't need it — nothing there
-            // consumes it, and the widget re-reads by path instead.
-            ...(origin === 'ui' ? {
-                structuredContent: {
-                    fileName: path.basename(resolvedEditPath),
-                    filePath: resolvedEditPath,
-                    fileType: resolvePreviewFileType(resolvedEditPath),
-                    ...await getDefaultEditorMetadata(resolvedEditPath),
+            structuredContent: {
+                ...previewMetadata,
+                pagination: {
+                    offset: previewStart,
+                    returnedLines: previewLineCount,
+                    totalLines,
+                    remainingLines,
+                    fromEnd: false,
                 },
-            } : {}),
+            },
         };
     }
     

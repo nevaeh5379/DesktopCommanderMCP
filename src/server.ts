@@ -34,6 +34,7 @@ function buildToolOutputSchema(toolName: string) {
 
     switch (toolName) {
         case 'read_file':
+        case 'edit_block':
             properties.pagination = {
                 type: 'object' as const,
                 properties: {
